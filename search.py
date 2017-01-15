@@ -14,7 +14,7 @@ from contextlib import suppress
 DATA_QUEUE_SIZE = 100
 DATA_GETTING_TIMEOUT = 15
 INITAL_DATA_READING_TIMEOUT = 1
-DUMP_DB = 'searched.db'
+DUMP_DB = 'duplicated.db'
 
 
 logger = logging.getLogger('main')
@@ -36,10 +36,10 @@ def main(dir, thread_count, dump):
     pool = Pool(processes=thread_count)
     all_files = []
     data_queue = Queue(DATA_QUEUE_SIZE)
-    searched = collections.defaultdict(list)
+    duplicated = collections.defaultdict(list)
 
     for dirpath, dirnames, filenames in os.walk(dir, onerror=lambda err: logger.error('walk error')):
-        all_files.extend(os.path.join(dirpath, fn) for fn in filenames)
+        all_files.extend(os.path.join(dirpath, fn) for fn in filenames if not fn.lower().endswith('.mp4'))
     logger.info('All files count is %d' % len(all_files))
 
     pget_file_data = functools.partial(get_file_data, data_queue, logger)
@@ -51,14 +51,20 @@ def main(dir, thread_count, dump):
         while not aresult.ready():
             afn, data = data_queue.get(timeout=DATA_GETTING_TIMEOUT)
             hash = hashlib.sha1(data).hexdigest()
-            searched[hash].append(afn)
+            duplicated[hash].append(afn)
             logger.info('hashed')
             data_queue.task_done()
 
-    if dump:
+    duplicated = dict(filter(lambda item: len(item[1]) >= 2 , duplicated.items()))
+    if not duplicated:
+        logger.info('there are not duplicated photoes')
+    elif dump:
         with shelve.open(DUMP_DB) as db:
-            db['searched'] = searched
+            db['duplicated'] = duplicated
         logger.info('dumped to the %s' % DUMP_DB)
+    else:
+        logger.info(duplicated)
+
     logger.info('finished')
 
 
