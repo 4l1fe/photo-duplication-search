@@ -2,6 +2,7 @@ import os
 import collections
 import hashlib
 import logging
+import logging.config
 import functools
 import argparse
 import shelve
@@ -11,18 +12,14 @@ from queue import Queue, Empty
 from contextlib import suppress
 
 
+LOGGER = 'main'
 DATA_QUEUE_SIZE = 100
 DATA_GETTING_TIMEOUT = 15
 INITAL_DATA_READING_TIMEOUT = 1
 DUMP_DB = 'duplicated.db'
 
 
-logger = logging.getLogger('main')
-sh = logging.StreamHandler()
-sh.setLevel(logging.DEBUG)
-sh.setFormatter(logging.Formatter(fmt='%(asctime)s %(thread)s %(message)s'))
-logger.addHandler(sh)
-logger.setLevel(logging.DEBUG)
+logger = logging.getLogger(LOGGER)
 
 
 def get_file_data(data_queue, logger, absolute_file_name):
@@ -74,5 +71,27 @@ if __name__ == '__main__':
     arg_parser.add_argument('-tc', '--thread-count', type=int, default=os.cpu_count()*2)
     arg_parser.add_argument('-dump', action='store_true')
     args = arg_parser.parse_args()
+
+    logging_conf = {
+        'version': 1,
+        'formatters': {
+            'common': {'class': 'logging.Formatter',
+                       'format': '%(asctime)s %(thread)s %(message)s'
+            },
+        },
+        'handlers': {
+            'stdout': {'class': 'logging.StreamHandler',
+                       'level': 'DEBUG',
+                       'formatter': 'common',
+                       'stream': 'ext://sys.stdout'
+           },
+        },
+        'loggers': {
+            LOGGER: {'handlers': ['stdout'],
+                     'level': 'DEBUG'
+            },
+        },
+    }
+    logging.config.dictConfig(logging_conf)
 
     main(args.directory, args.thread_count, args.dump)
