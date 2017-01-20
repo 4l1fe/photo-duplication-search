@@ -7,7 +7,7 @@ import functools
 import argparse
 import shelve
 
-from multiprocessing import Manager, Pool
+from multiprocessing import Manager, Pool as ProcessPool
 from multiprocessing.pool import ThreadPool
 from multiprocessing.queues import Empty
 from contextlib import suppress
@@ -29,13 +29,16 @@ def put_file_data(data_queue, logger, absolute_file_name):
         logger.info('putted %d bytes' % len(data))
 
 
-def put_afn_data_hash(data_queue, duplicated_queue):
+def full_duplicated(data_queue, duplicated):
     with suppress(Empty):
         while True:
             afn, data = data_queue.get(timeout=DATA_GETTING_TIMEOUT)
             hash = hashlib.sha1(data).hexdigest()
             print(afn, hash)
-            duplicated_queue.put_nowait((afn, hash))
+            if hash not in duplicated:
+                duplicated[hash] = [afn]
+            else:
+                duplicated[hash].append(afn)
     print('worker exited')
 
 
@@ -43,7 +46,7 @@ def SearchManager(dir, thread_count, process_count, dump):
     logger.debug('thread count: %d' % thread_count)
     manager = Manager()
     data_queue = manager.Queue(DATA_QUEUE_SIZE)
-    duplicated_queue = manager.Queue()
+    duplicated = manager.dict()
     all_files = []
     for dirpath, dirnames, filenames in os.walk(dir, onerror=lambda err: logger.error('walk error')):
         all_files.extend(os.path.join(dirpath, fn) for fn in filenames if not fn.lower().endswith('.mp4'))
@@ -59,8 +62,8 @@ def SearchManager(dir, thread_count, process_count, dump):
     logger.info('pooled all file names')
 
 
-    hpool = Pool(process_count)
-    hresult = hpool.starmap_async(put_afn_data_hash, [(data_queue, duplicated_queue) for _ in range(process_count)],
+    hpool = ProcessPool(process_count)
+    hresult = hpool.starmap_async(full_duplicated, [(data_queue, duplicated) for _ in range(process_count)],
                                error_callback=error_callback)
     rpool.close()
     rpool.join()
@@ -68,15 +71,7 @@ def SearchManager(dir, thread_count, process_count, dump):
     hpool.join()
 
 
-    def get_duplicated():
-        d = collections.defaultdict(list)
-        while not duplicated_queue.empty():
-            logger.debug(duplicated_queue.qsize())
-            afn, hash = duplicated_queue.get()
-            d[hash].append(afn)
-        return dict(filter(lambda item: len(item[1]) >= 2, d.items()))
-
-    duplicated = get_duplicated()
+    duplicated = dict(filter(lambda item: len(item[1]) >= 2, duplicated.items()))
     if not duplicated:
         logger.info('there are not duplicated photoes')
     elif dump:
